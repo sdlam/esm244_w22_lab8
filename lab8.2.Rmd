@@ -1,0 +1,165 @@
+---
+title: "lab8 part 2: time series exploration"
+author: "Sarah Lam"
+date: "2/24/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(here)
+library(lubridate)
+library(tsibble)
+library(feasts)
+library(slider)
+```
+
+```{r}
+toolik <- read_csv(here('data', 'toolikweather.csv'))
+```
+
+```{r, eval = FALSE} 
+ggplot(data = toolik, aes(x = date, y = mean_airtemp)) + #won't work b/c doesn't knwo dates are dates
+  geom_line()
+```
+
+```{r}
+toolik_ts <- toolik %>% 
+  mutate(date = lubridate::mdy(date)) %>% 
+  as_tsibble(key = NULL, index = date)
+
+ggplot(data = toolik_ts, aes(x = date, y = mean_airtemp)) +
+  geom_line() +
+  labs(x = "Date",
+       y = "Mean daily air temperature (Celsius)\n at Toolik Station")
+```
+
+```{r}
+toolik_month <- toolik_ts %>% 
+  index_by(yr_mo = ~yearmonth(.)) %>% 
+  summarize(monthly_mean_temp = mean(mean_airtemp, na.rm = TRUE))
+
+ggplot(data = toolik_month, aes(x = yr_mo, y = monthly_mean_temp)) +
+  geom_line() 
+ 
+toolik_month %>% 
+  ggplot(aes(x = year(yr_mo), y = monthly_mean_temp)) +
+  geom_line() +
+  facet_wrap(~month(yr_mo, label = TRUE)) +
+  labs(x = "Year",
+       y = "Annual mean air temperature (Celsius)",
+       title = "Toolik Station mean annual air temperature",
+       subtitle = "1988 - 2018",
+       caption = "Source: Shaver, G. 2019. A multi-year DAILY \nweather file for the Toolik Field Station at Toolik Lake, AK\n starting 1988 to present. ver 4. Environmental Data Initiative.")
+```
+
+```{r}
+toolik_annual <- toolik_ts %>% 
+  index_by(yearly = ~year(.)) %>% 
+  summarize(annual_airtemp = mean(mean_airtemp, na.rm = TRUE))
+ 
+ggplot(data = toolik_annual, aes(x = yearly, y = annual_airtemp)) +
+  geom_line()
+```
+
+```{r}
+toolik_ts %>% 
+  filter_index("2000-06" ~ "2001-10")
+```
+
+
+```{r}
+toolik_ts %>% 
+  filter_index('2015-01-01' ~.) %>%  #(year(date) > 2014) %>% 
+  gg_season(y = mean_airtemp)
+```
+
+```{r}
+toolik_month %>% 
+  gg_season(y = monthly_mean_temp) +
+  theme_minimal() +
+  labs(x = "Year",
+       y = "Mean monthly air temperature (Celsius)",
+       title = "Toolik Station air temperature") +
+  theme_minimal()
+```
+
+```{r}
+toolik_month %>% 
+  gg_subseries(monthly_mean_temp)
+```
+
+## Moving averages! 
+
+```{r}
+set.seed(2021)
+test<- rnorm(100, mean = 40, sd = 10)
+ 
+# Show the series based on values +2 and -2 from each observation
+# Use ~.x to show the windows
+slide(test, ~.x, .before = 2, .after = 2)
+ 
+# Change that to a function name to actually calculate something for each window
+# Note that I add `as.numeric` here, since the outcome is otherwise a list
+w5 <- as.numeric(slide(test, mean, .before = 2, .after = 2))
+w5
+ 
+# Find the mean value of a window with n = 11, centered:
+w11 <- as.numeric(slide(test, mean, .before = 5, .after = 5))
+w11
+ 
+# Find the mean value of a window with n = 19, centered:
+w19 <- as.numeric(slide(test, mean, .before = 9, .after = 9))
+w19
+ 
+# Plot these together: 
+combo <- data_frame(time = seq(1:100), test, w5, w11, w19)
+ 
+ggplot(data = combo) +
+  geom_line(aes(x = time, y = test)) +
+  geom_line(aes(x = time, y = w5), color = "red") +
+  geom_line(aes(x = time, y = w11), color = "blue") +
+  geom_line(aes(x = time, y = w19), color = "orange")
+```
+
+```{r}
+roll_toolik_15 <- toolik_ts %>% 
+  mutate(ma_15d = as.numeric(slide(toolik_ts$mean_airtemp, mean, .before = 7, .after = 7)))
+
+roll_toolik_61 <- toolik_ts %>% 
+  mutate(ma_61d = as.numeric(slide(toolik_ts$mean_airtemp, mean, .before = 30, .after = 30)))
+ 
+ggplot() +
+  geom_line(data = toolik_ts, aes(x = date, y = mean_airtemp), size = 0.2, color = "gray") +
+  geom_line(data = roll_toolik_15, aes(x = date, y = ma_15d), color = "orange") +
+  geom_line(data = roll_toolik_61, aes(x = date, y = ma_61d), color = "blue") +
+  theme_minimal()
+```
+
+## Autocorrelation function 
+
+```{r}
+toolik_ts %>% 
+  ACF(mean_airtemp) %>% 
+  autoplot()
+
+toolik_month %>% 
+  ACF(monthly_mean_temp) %>% 
+  autoplot()
+```
+
+## Decomposition 
+
+```{r}
+toolik_dec <- toolik_month %>% 
+  model(STL(monthly_mean_temp ~ season(window = Inf)))
+ 
+components(toolik_dec) %>% autoplot()
+```
+
+
+
+
+

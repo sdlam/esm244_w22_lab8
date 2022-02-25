@@ -1,0 +1,113 @@
+---
+title: "Lab 8 part 1: point pattern analysis"
+author: "Sarah Lam"
+date: "2/24/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(spatstat)
+library(raster)
+library(maptools)
+library(tidyverse)
+library(here)
+library(sf)
+library(tmap)
+```
+
+```{r}
+voles <- read_sf(dsn = here('redtreevoledata'), 
+                 layer = 'ds033') %>% 
+  janitor::clean_names() %>% 
+  select(county) %>% 
+  filter(county =='HUM') %>% 
+  st_transform(crs = 32610)
+
+plot(voles)
+
+humboldt <-  read_sf(dsn = 'redtreevoledata',
+                    layer = 'california_county_shape_file') %>% 
+  janitor::clean_names() %>% 
+  filter(name == 'Humboldt') %>% 
+  st_set_crs(4326) %>% 
+  st_transform(32610)
+```
+
+```{r}
+ggplot() +
+  geom_sf(data = humboldt, 
+          color = 'darkorchid', 
+          fill = 'darkorchid4', 
+          size = 1) +
+  geom_sf(data = voles, 
+          color = 'orange', 
+          alpha = 0.7, 
+          size = 2) +
+  theme_minimal()
+```
+
+```{r}
+voles_sp <- as(voles, 'Spatial')
+voles_ppp <- as(voles_sp, 'ppp')
+
+humboldt_sp <- as(humboldt, 'Spatial')
+humboldt_win <- as(humboldt_sp, 'owin')
+
+voles_full <- ppp(voles_ppp$x, voles_ppp$y, window = humboldt_win) 
+
+plot(voles_full)
+```
+
+### Make a kernel density plot 
+
+```{r}
+voles_density <- density(voles_full, sigma = 1000)
+
+plot(voles_density)
+```
+
+```{r}
+vole_raster <- raster(voles_density) 
+crs(vole_raster) <- crs(voles)
+
+tmap_mode("view")
+ 
+tm_shape(vole_raster) +
+  tm_raster(midpoint = NA, 
+            palette = "Reds", 
+            legend.show = FALSE)
+```
+
+## Nearest neighbor (G function) 
+
+```{r}
+r_vec <-  seq(0, 10000, by = 100)
+gfunction <- envelope(voles_full, fun = Gest, r = r_vec, nsim = 100, nrank = 2) 
+
+gfunction_long <- gfunction %>% 
+  as.data.frame() %>% 
+  pivot_longer(cols = obs:hi, names_to = "model", values_to = "g_val")
+
+ggplot(data = gfunction_long, aes(x = r, y = g_val, group = model)) +
+  geom_line(aes(color = model))
+
+```
+
+```{r}
+r_vec2 <- seq(1, 100000, by = 5000) 
+
+lfunction <- envelope(voles_full, fun = Lest, r = r_vec2, nsim = 10, rank = 2, global = TRUE)
+ 
+lfunction_long <- lfunction %>% 
+  as.data.frame() %>% 
+  pivot_longer(cols = obs:hi, names_to = "model", values_to = "l_val")
+
+ggplot(data = lfunction_long, aes(x = r, y = k_val, group = model)) +
+  geom_line(aes(color = model))
+```
+
+
+
+
